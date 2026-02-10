@@ -48,19 +48,21 @@ export class RailwayClient {
     return json.data as T;
   }
 
-  // ─── Teams ─────────────────────────────────────────────────
+  // ─── Workspaces (Railway calls them workspaces, not teams) ──
 
-  async listTeams() {
+  async listWorkspaces() {
     return this.query(`
       query {
         me {
-          teams {
+          workspaces {
             edges {
               node {
                 id
                 name
                 avatar
+                plan
                 createdAt
+                updatedAt
               }
             }
           }
@@ -71,32 +73,71 @@ export class RailwayClient {
 
   // ─── Projects ──────────────────────────────────────────────
 
-  async listPersonalProjects() {
-    return this.query(`
-      query {
-        me {
-          projects {
-            edges {
-              node {
-                id
-                name
-                description
-                createdAt
-                updatedAt
-                environments {
-                  edges {
-                    node {
-                      id
-                      name
+  async listProjects(workspaceId?: string) {
+    if (workspaceId) {
+      return this.query(
+        `
+        query ($workspaceId: String!) {
+          workspace(workspaceId: $workspaceId) {
+            id
+            name
+            projects {
+              edges {
+                node {
+                  id
+                  name
+                  description
+                  createdAt
+                  updatedAt
+                  environments {
+                    edges {
+                      node {
+                        id
+                        name
+                      }
+                    }
+                  }
+                  services {
+                    edges {
+                      node {
+                        id
+                        name
+                      }
                     }
                   }
                 }
-                services {
-                  edges {
-                    node {
-                      id
-                      name
-                    }
+              }
+            }
+          }
+        }
+      `,
+        { workspaceId }
+      );
+    }
+    // No workspaceId — list all projects visible to this token
+    return this.query(`
+      query {
+        projects {
+          edges {
+            node {
+              id
+              name
+              description
+              createdAt
+              updatedAt
+              environments {
+                edges {
+                  node {
+                    id
+                    name
+                  }
+                }
+              }
+              services {
+                edges {
+                  node {
+                    id
+                    name
                   }
                 }
               }
@@ -107,72 +148,11 @@ export class RailwayClient {
     `);
   }
 
-  async listTeamProjects(teamId: string) {
-    return this.query(
-      `
-      query ($teamId: String!) {
-        team(id: $teamId) {
-          id
-          name
-          projects {
-            edges {
-              node {
-                id
-                name
-                description
-                createdAt
-                updatedAt
-                environments {
-                  edges {
-                    node {
-                      id
-                      name
-                    }
-                  }
-                }
-                services {
-                  edges {
-                    node {
-                      id
-                      name
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    `,
-      { teamId }
-    );
-  }
-
   async listAllProjects() {
-    // First get teams, then fetch all projects in parallel
-    const teamsResult = await this.listTeams() as any;
-    const teams = teamsResult?.me?.teams?.edges?.map((e: any) => e.node) || [];
-
-    const personalResult = await this.listPersonalProjects() as any;
-    const personalProjects =
-      personalResult?.me?.projects?.edges?.map((e: any) => e.node) || [];
-
-    const teamResults = await Promise.all(
-      teams.map(async (team: any) => {
-        const result = await this.listTeamProjects(team.id) as any;
-        return {
-          teamId: team.id,
-          teamName: team.name,
-          projects:
-            result?.team?.projects?.edges?.map((e: any) => e.node) || [],
-        };
-      })
-    );
-
-    return {
-      personal: personalProjects,
-      teams: teamResults,
-    };
+    // Simply list all projects visible to this token
+    const result = await this.listProjects() as any;
+    const projects = result?.projects?.edges?.map((e: any) => e.node) || [];
+    return projects;
   }
 
   async getProject(projectId: string) {
@@ -664,8 +644,7 @@ export class RailwayClient {
       query {
         me {
           name
-          email
-          teams {
+          workspaces {
             edges {
               node {
                 id
@@ -676,9 +655,9 @@ export class RailwayClient {
         }
       }
     `)) as any;
-    const teams = result?.me?.teams?.edges?.map((e: any) => e.node) || [];
-    const teamNames = teams.map((t: any) => t.name).join(", ");
-    return `${result?.me?.name || "Unknown"} (teams: ${teamNames || "none"})`;
+    const workspaces = result?.me?.workspaces?.edges?.map((e: any) => e.node) || [];
+    const wsNames = workspaces.map((w: any) => w.name).join(", ");
+    return `${result?.me?.name || "Unknown"} (workspaces: ${wsNames || "none"})`;
   }
 }
 
@@ -723,22 +702,22 @@ export class MultiRailwayClient {
     return fulfilled;
   }
 
-  // ─── Teams ─────────────────────────────────────────────────
+  // ─── Workspaces ─────────────────────────────────────────────
 
   async listTeams() {
-    const results = await this.fromAll((c) => c.listTeams());
+    const results = await this.fromAll((c) => c.listWorkspaces());
     return results;
   }
 
-  // ─── Projects (merged across all workspaces) ───────────────
+  // ─── Projects (merged across all workspace tokens) ─────────
 
   async listAllProjects() {
-    const results = await this.fromAll((c) => c.listPersonalProjects());
-    const personalByWorkspace = results.map((r) => ({
+    const results = await this.fromAll((c) => c.listAllProjects());
+    const workspaces = results.map((r) => ({
       workspace: r.workspace,
-      projects: (r.data as any)?.me?.projects?.edges?.map((e: any) => e.node) || [],
+      projects: r.data as any[],
     }));
-    return { workspaces: personalByWorkspace };
+    return { workspaces };
   }
 
   async listPersonalProjects() {
@@ -746,7 +725,7 @@ export class MultiRailwayClient {
   }
 
   async listTeamProjects(teamId: string) {
-    return this.tryEach((c) => c.listTeamProjects(teamId));
+    return this.tryEach((c) => c.listProjects(teamId));
   }
 
   // ─── Single-resource lookups (try each token) ──────────────
