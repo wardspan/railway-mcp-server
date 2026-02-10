@@ -1,0 +1,23 @@
+{
+  "name": "railway-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for Railway.app - deploy, manage, and monitor Railway services",
+  "type": "module",
+  "main": "build/index.js",
+  "bin": {
+    "railway-mcp": "build/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
